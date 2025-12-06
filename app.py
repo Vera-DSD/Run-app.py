@@ -79,8 +79,19 @@ if model and preprocessor:
                             # Преобразуем данные через препроцессор
                             X_processed = preprocessor.transform(df)
                             
+                            # Если результат не DataFrame, преобразуем его
+                            if not isinstance(X_processed, pd.DataFrame):
+                                # Пробуем получить имена признаков
+                                if hasattr(preprocessor, 'get_feature_names_out'):
+                                    feature_names = preprocessor.get_feature_names_out()
+                                    X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
+                                else:
+                                    X_processed_df = pd.DataFrame(X_processed)
+                            else:
+                                X_processed_df = X_processed
+                            
                             # Делаем предсказания
-                            predictions = model.predict(X_processed)
+                            predictions = model.predict(X_processed_df)
                             
                             # Создаем результаты
                             if 'Id' in df.columns:
@@ -105,7 +116,7 @@ if model and preprocessor:
                             
                             # Таблица с результатами
                             st.subheader("Результаты предсказания")
-                            st.dataframe(results)
+                            st.dataframe(results.head(20))
                             
                             # Скачивание
                             csv_data = results.to_csv(index=False)
@@ -119,6 +130,12 @@ if model and preprocessor:
                             
                         except Exception as e:
                             st.error(f"❌ Ошибка при обработке данных: {str(e)[:200]}")
+                            
+                            # Отладочная информация
+                            with st.expander("🔍 Детали ошибки"):
+                                st.write(f"Тип X_processed: {type(X_processed)}")
+                                if hasattr(X_processed, 'shape'):
+                                    st.write(f"Форма X_processed: {X_processed.shape}")
                             
             except Exception as e:
                 st.error(f"❌ Ошибка при чтении файла: {e}")
@@ -246,8 +263,18 @@ if model and preprocessor:
                         # Применяем препроцессор
                         X_processed = preprocessor.transform(df_test)
                         
+                        # Если результат не DataFrame, преобразуем его
+                        if not isinstance(X_processed, pd.DataFrame):
+                            if hasattr(preprocessor, 'get_feature_names_out'):
+                                feature_names = preprocessor.get_feature_names_out()
+                                X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
+                            else:
+                                X_processed_df = pd.DataFrame(X_processed)
+                        else:
+                            X_processed_df = X_processed
+                        
                         # Делаем предсказание
-                        prediction = model.predict(X_processed)[0]
+                        prediction = model.predict(X_processed_df)[0]
                         
                         # Показываем результат
                         st.success(f"## 🏡 Предсказанная цена: **${prediction:,.0f}**")
@@ -265,6 +292,13 @@ if model and preprocessor:
                             
                     except Exception as e:
                         st.error(f"❌ Ошибка: {str(e)[:200]}")
+                        
+                        # Отладочная информация
+                        with st.expander("🔍 Детали ошибки"):
+                            if 'X_processed' in locals():
+                                st.write(f"Тип X_processed: {type(X_processed)}")
+                                if hasattr(X_processed, 'shape'):
+                                    st.write(f"Форма X_processed: {X_processed.shape}")
 
 else:
     st.warning("⚠️ Проверьте наличие файлов GB_model.pkl и preprocessor.pkl в папке")
