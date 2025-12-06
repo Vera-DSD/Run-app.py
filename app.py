@@ -1,205 +1,284 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
+import joblib
+from sklearn.pipeline import Pipeline
 
-# Простая конфигурация без кэширования
+# Настройка страницы
 st.set_page_config(
     page_title="House Price Predictor",
-    layout="centered"
+    page_icon="🏠",
+    layout="wide"
 )
 
+# Заголовок
 st.title("🏠 House Price Predictor")
-st.write("Загрузите CSV файл для предсказания цен на дома")
+st.markdown("### Предсказание цен на дома с использованием Gradient Boosting")
 
 # Загрузка модели и препроцессора
-try:
-    model = joblib.load('GB_model.pkl')
-    preprocessor = joblib.load('preprocessor.pkl')
-    st.success("✅ Модель и препроцессор загружены")
-except Exception as e:
-    st.error(f"❌ Ошибка загрузки: {e}")
-    st.stop()
-
-# Простой интерфейс с одной вкладкой
-uploaded_file = st.file_uploader("Выберите CSV файл", type=['csv'])
-
-if uploaded_file is not None:
+@st.cache_resource
+def load_model():
     try:
-        # Чтение файла
-        df = pd.read_csv(uploaded_file)
-        
-        st.write(f"**Загружено:** {df.shape[0]} строк, {df.shape[1]} колонок")
-        
-        # Показать превью
-        if st.checkbox("Показать данные"):
-            st.dataframe(df.head())
-        
-        # Кнопка для предсказания
-        if st.button("🎯 Сделать предсказания", type="primary"):
-            with st.spinner("Обрабатываю данные..."):
-                try:
-                    # Применяем препроцессор
-                    X_processed = preprocessor.transform(df)
-                    
-                    # Делаем предсказания
-                    predictions = model.predict(X_processed)
-                    
-                    # Создаем результаты
-                    if 'Id' in df.columns:
-                        results = pd.DataFrame({
-                            'Id': df['Id'],
-                            'SalePrice': predictions
-                        })
-                    else:
-                        results = pd.DataFrame({
-                            'Id': range(1, len(df) + 1),
-                            'SalePrice': predictions
-                        })
-                    
-                    st.success("✅ Предсказания готовы!")
-                    
-                    # Статистика
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Средняя цена", f"${predictions.mean():,.0f}")
-                    with col2:
-                        st.metric("Минимальная цена", f"${predictions.min():,.0f}")
-                    with col3:
-                        st.metric("Максимальная цена", f"${predictions.max():,.0f}")
-                    
-                    # Показать таблицу
-                    st.write("**Первые 10 результатов:**")
-                    st.dataframe(results.head(10))
-                    
-                    # Скачать все результаты
-                    csv = results.to_csv(index=False)
-                    st.download_button(
-                        "📥 Скачать все результаты (CSV)",
-                        data=csv,
-                        file_name="predictions.csv",
-                        mime="text/csv"
-                    )
-                    
-                except Exception as e:
-                    st.error(f"❌ Ошибка: {str(e)[:200]}")
-                    
+        model = joblib.load('GB_model.pkl')
+        return model
     except Exception as e:
-        st.error(f"❌ Ошибка чтения файла: {e}")
+        st.error(f"❌ Ошибка загрузки модели: {e}")
+        return None
 
-# Простая форма для тестирования
+@st.cache_resource
+def load_preprocessor():
+    try:
+        preprocessor = joblib.load('preprocessor.pkl')
+        return preprocessor
+    except Exception as e:
+        st.error(f"❌ Ошибка загрузки препроцессора: {e}")
+        return None
+
+# Загружаем
+model = load_model()
+preprocessor = load_preprocessor()
+
+if model and preprocessor:
+    st.success("✅ Модель и препроцессор успешно загружены!")
+    
+    # Показать информацию о модели
+    with st.expander("ℹ️ Информация о модели"):
+        st.write(f"**Тип модели:** {type(model).__name__}")
+        if hasattr(model, 'n_estimators'):
+            st.write(f"**Количество деревьев:** {model.n_estimators}")
+        if hasattr(model, 'feature_names_in_'):
+            st.write(f"**Используется признаков:** {len(model.feature_names_in_)}")
+    
+    # Основной интерфейс
+    tab1, tab2 = st.tabs(["📤 Загрузка CSV", "📝 Ручной ввод"])
+    
+    with tab1:
+        st.header("Загрузите CSV файл с данными")
+        
+        uploaded_file = st.file_uploader(
+            "Выберите CSV файл", 
+            type=['csv'],
+            key="csv_uploader"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                # Чтение файла
+                df = pd.read_csv(uploaded_file)
+                
+                st.success(f"✅ Файл загружен: {df.shape[0]} строк, {df.shape[1]} колонок")
+                
+                # Показать данные
+                if st.checkbox("Показать первые 5 строк"):
+                    st.dataframe(df.head())
+                
+                # Кнопка предсказания
+                if st.button("🎯 Сделать предсказания", key="predict_csv"):
+                    with st.spinner("Обрабатываю данные..."):
+                        try:
+                            # Преобразуем данные через препроцессор
+                            X_processed = preprocessor.transform(df)
+                            
+                            # Делаем предсказания
+                            predictions = model.predict(X_processed)
+                            
+                            # Создаем результаты
+                            if 'Id' in df.columns:
+                                results = pd.DataFrame({
+                                    'Id': df['Id'],
+                                    'SalePrice': predictions
+                                })
+                            else:
+                                results = pd.DataFrame({
+                                    'Id': range(1, len(df) + 1),
+                                    'SalePrice': predictions
+                                })
+                            
+                            # Показываем результаты
+                            st.success("✅ Предсказания готовы!")
+                            
+                            # Статистика
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Средняя цена", f"${predictions.mean():,.0f}")
+                            col2.metric("Минимальная цена", f"${predictions.min():,.0f}")
+                            col3.metric("Максимальная цена", f"${predictions.max():,.0f}")
+                            
+                            # Таблица с результатами
+                            st.subheader("Результаты предсказания")
+                            st.dataframe(results)
+                            
+                            # Скачивание
+                            csv_data = results.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Скачать результаты (CSV)",
+                                data=csv_data,
+                                file_name="house_price_predictions.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                            
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при обработке данных: {str(e)[:200]}")
+                            
+            except Exception as e:
+                st.error(f"❌ Ошибка при чтении файла: {e}")
+    
+    with tab2:
+        st.header("Ручной ввод параметров")
+        
+        # Простая форма для основных параметров
+        with st.form("manual_input_form"):
+            st.subheader("Основные параметры дома")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                overall_qual = st.slider("Общее качество (1-10)", 1, 10, 7)
+                gr_liv_area = st.number_input("Жилая площадь (кв.фут)", 500, 5000, 1500)
+                total_bsmt_sf = st.number_input("Площадь подвала (кв.фут)", 0, 3000, 1000)
+                year_built = st.number_input("Год постройки", 1900, 2024, 2000)
+                
+            with col2:
+                lot_area = st.number_input("Площадь участка (кв.фут)", 1000, 50000, 10000)
+                bedroom_abv_gr = st.slider("Количество спален", 0, 8, 3)
+                full_bath = st.slider("Полных ванных", 0, 4, 2)
+                fireplaces = st.slider("Камины", 0, 4, 1)
+            
+            # Категориальные признаки
+            neighborhood = st.selectbox("Район", 
+                ['NAmes', 'CollgCr', 'OldTown', 'Edwards', 'Somerst', 'Gilbert', 'NridgHt', 'BrkSide'])
+            
+            kitchen_qual = st.selectbox("Качество кухни",
+                ['Ex', 'Gd', 'TA', 'Fa', 'Po'])
+            
+            # Отправка формы
+            submitted = st.form_submit_button("💰 Предсказать цену", use_container_width=True)
+            
+            if submitted:
+                with st.spinner("Рассчитываю стоимость..."):
+                    try:
+                        # Создаем тестовые данные с основными параметрами
+                        test_data = {
+                            'MSSubClass': 60,
+                            'MSZoning': 'RL',
+                            'LotFrontage': 70.0,
+                            'LotArea': lot_area,
+                            'Street': 'Pave',
+                            'Alley': 'NA',
+                            'LotShape': 'Reg',
+                            'LandContour': 'Lvl',
+                            'Utilities': 'AllPub',
+                            'LotConfig': 'Inside',
+                            'LandSlope': 'Gtl',
+                            'Neighborhood': neighborhood,
+                            'Condition1': 'Norm',
+                            'Condition2': 'Norm',
+                            'BldgType': '1Fam',
+                            'HouseStyle': '1Story',
+                            'OverallQual': overall_qual,
+                            'OverallCond': 5,
+                            'YearBuilt': year_built,
+                            'YearRemodAdd': year_built,
+                            'RoofStyle': 'Gable',
+                            'RoofMatl': 'CompShg',
+                            'Exterior1st': 'VinylSd',
+                            'Exterior2nd': 'VinylSd',
+                            'MasVnrType': 'None',
+                            'MasVnrArea': 0.0,
+                            'ExterQual': 'TA',
+                            'ExterCond': 'TA',
+                            'Foundation': 'PConc',
+                            'BsmtQual': 'TA',
+                            'BsmtCond': 'TA',
+                            'BsmtExposure': 'No',
+                            'BsmtFinType1': 'Unf',
+                            'BsmtFinSF1': 500.0,
+                            'BsmtFinType2': 'Unf',
+                            'BsmtFinSF2': 0.0,
+                            'BsmtUnfSF': 500.0,
+                            'TotalBsmtSF': total_bsmt_sf,
+                            'Heating': 'GasA',
+                            'HeatingQC': 'TA',
+                            'CentralAir': 'Y',
+                            'Electrical': 'SBrkr',
+                            '1stFlrSF': 1200,
+                            '2ndFlrSF': 0,
+                            'LowQualFinSF': 0,
+                            'GrLivArea': gr_liv_area,
+                            'BsmtFullBath': 0,
+                            'BsmtHalfBath': 0,
+                            'FullBath': full_bath,
+                            'HalfBath': 1,
+                            'BedroomAbvGr': bedroom_abv_gr,
+                            'KitchenAbvGr': 1,
+                            'KitchenQual': kitchen_qual,
+                            'TotRmsAbvGrd': 6,
+                            'Functional': 'Typ',
+                            'Fireplaces': fireplaces,
+                            'FireplaceQu': 'NA',
+                            'GarageType': 'Attchd',
+                            'GarageYrBlt': year_built,
+                            'GarageFinish': 'Unf',
+                            'GarageCars': 2,
+                            'GarageArea': 500,
+                            'GarageQual': 'TA',
+                            'GarageCond': 'TA',
+                            'PavedDrive': 'Y',
+                            'WoodDeckSF': 0,
+                            'OpenPorchSF': 50,
+                            'EnclosedPorch': 0,
+                            '3SsnPorch': 0,
+                            'ScreenPorch': 0,
+                            'PoolArea': 0,
+                            'PoolQC': 'NA',
+                            'Fence': 'NA',
+                            'MiscFeature': 'NA',
+                            'MiscVal': 0,
+                            'MoSold': 6,
+                            'YrSold': 2024,
+                            'SaleType': 'WD',
+                            'SaleCondition': 'Normal'
+                        }
+                        
+                        # Создаем DataFrame
+                        df_test = pd.DataFrame([test_data])
+                        
+                        # Применяем препроцессор
+                        X_processed = preprocessor.transform(df_test)
+                        
+                        # Делаем предсказание
+                        prediction = model.predict(X_processed)[0]
+                        
+                        # Показываем результат
+                        st.success(f"## 🏡 Предсказанная цена: **${prediction:,.0f}**")
+                        
+                        # Информация о введенных параметрах
+                        with st.expander("📊 Детали расчета"):
+                            st.write(f"**Введенные параметры:**")
+                            st.write(f"- Общее качество: {overall_qual}/10")
+                            st.write(f"- Жилая площадь: {gr_liv_area} кв.футов")
+                            st.write(f"- Площадь участка: {lot_area} кв.футов")
+                            st.write(f"- Год постройки: {year_built}")
+                            st.write(f"- Количество спален: {bedroom_abv_gr}")
+                            st.write(f"- Район: {neighborhood}")
+                            st.write(f"- Качество кухни: {kitchen_qual}")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Ошибка: {str(e)[:200]}")
+
+else:
+    st.warning("⚠️ Проверьте наличие файлов GB_model.pkl и preprocessor.pkl в папке")
+
+# Футер
 st.markdown("---")
-st.write("### Тест с примером данных")
+st.markdown("""
+### 📋 Требования к CSV файлу:
+- Должен содержать все 79 признаков из оригинального датасета
+- Категориальные признаки должны быть в строковом формате
+- Числовые признаки должны быть в числовом формате
 
-# Создаем пример данных
-example_data = {
-    'MSSubClass': 60,
-    'MSZoning': 'RL',
-    'LotFrontage': 65.0,
-    'LotArea': 8450,
-    'Street': 'Pave',
-    'Alley': 'NA',
-    'LotShape': 'Reg',
-    'LandContour': 'Lvl',
-    'Utilities': 'AllPub',
-    'LotConfig': 'Inside',
-    'LandSlope': 'Gtl',
-    'Neighborhood': 'NAmes',
-    'Condition1': 'Norm',
-    'Condition2': 'Norm',
-    'BldgType': '1Fam',
-    'HouseStyle': '1Story',
-    'OverallQual': 7,
-    'OverallCond': 5,
-    'YearBuilt': 2003,
-    'YearRemodAdd': 2003,
-    'RoofStyle': 'Gable',
-    'RoofMatl': 'CompShg',
-    'Exterior1st': 'VinylSd',
-    'Exterior2nd': 'VinylSd',
-    'MasVnrType': 'BrkFace',
-    'MasVnrArea': 196.0,
-    'ExterQual': 'Gd',
-    'ExterCond': 'TA',
-    'Foundation': 'PConc',
-    'BsmtQual': 'Gd',
-    'BsmtCond': 'TA',
-    'BsmtExposure': 'No',
-    'BsmtFinType1': 'GLQ',
-    'BsmtFinSF1': 706,
-    'BsmtFinType2': 'Unf',
-    'BsmtFinSF2': 0,
-    'BsmtUnfSF': 150,
-    'TotalBsmtSF': 856,
-    'Heating': 'GasA',
-    'HeatingQC': 'Ex',
-    'CentralAir': 'Y',
-    'Electrical': 'SBrkr',
-    '1stFlrSF': 856,
-    '2ndFlrSF': 854,
-    'LowQualFinSF': 0,
-    'GrLivArea': 1710,
-    'BsmtFullBath': 1,
-    'BsmtHalfBath': 0,
-    'FullBath': 2,
-    'HalfBath': 1,
-    'BedroomAbvGr': 3,
-    'KitchenAbvGr': 1,
-    'KitchenQual': 'Gd',
-    'TotRmsAbvGrd': 8,
-    'Functional': 'Typ',
-    'Fireplaces': 0,
-    'FireplaceQu': 'NA',
-    'GarageType': 'Attchd',
-    'GarageYrBlt': 2003.0,
-    'GarageFinish': 'RFn',
-    'GarageCars': 2,
-    'GarageArea': 548,
-    'GarageQual': 'TA',
-    'GarageCond': 'TA',
-    'PavedDrive': 'Y',
-    'WoodDeckSF': 0,
-    'OpenPorchSF': 61,
-    'EnclosedPorch': 0,
-    '3SsnPorch': 0,
-    'ScreenPorch': 0,
-    'PoolArea': 0,
-    'PoolQC': 'NA',
-    'Fence': 'NA',
-    'MiscFeature': 'NA',
-    'MiscVal': 0,
-    'MoSold': 2,
-    'YrSold': 2008,
-    'SaleType': 'WD',
-    'SaleCondition': 'Normal'
-}
-
-if st.button("🚀 Тест на примере данных"):
-    with st.spinner("Выполняю тестовое предсказание..."):
-        try:
-            # Создаем DataFrame
-            df_test = pd.DataFrame([example_data])
-            
-            # Применяем препроцессор
-            X_processed = preprocessor.transform(df_test)
-            
-            # Делаем предсказание
-            prediction = model.predict(X_processed)[0]
-            
-            st.success(f"🏡 Тестовое предсказание: **${prediction:,.0f}**")
-            
-        except Exception as e:
-            st.error(f"❌ Тестовая ошибка: {e}")
-
-# Инструкция
-st.markdown("---")
-st.write("""
-### 📋 Инструкция:
-1. Загрузите CSV файл с данными о домах
-2. Нажмите кнопку "Сделать предсказания"
-3. Скачайте результаты в CSV формате
-
-### ⚠️ Требования к файлу:
-- Должен содержать все 79 признаков
-- Формат как в train.csv Kaggle
+### 🔧 Техническая информация:
+- Модель: GradientBoostingRegressor
+- Препроцессор включает: CatBoostEncoder, StandardScaler
+- Удалены 28 признаков из оригинального набора
 """)
