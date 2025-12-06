@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.pipeline import Pipeline
 
 # Настройка страницы
 st.set_page_config(
@@ -41,13 +40,16 @@ preprocessor = load_preprocessor()
 if model and preprocessor:
     st.success("✅ Модель и препроцессор успешно загружены!")
     
-    # Показать информацию о модели
-    with st.expander("ℹ️ Информация о модели"):
-        st.write(f"**Тип модели:** {type(model).__name__}")
-        if hasattr(model, 'n_estimators'):
-            st.write(f"**Количество деревьев:** {model.n_estimators}")
-        if hasattr(model, 'feature_names_in_'):
-            st.write(f"**Используется признаков:** {len(model.feature_names_in_)}")
+    # Получаем имена признаков для препроцессора
+    try:
+        if hasattr(preprocessor, 'get_feature_names_out'):
+            feature_names = list(preprocessor.get_feature_names_out())
+            st.info(f"📊 Модель использует {len(feature_names)} признаков после обработки")
+        else:
+            feature_names = None
+            st.warning("⚠️ Не удалось получить имена признаков препроцессора")
+    except:
+        feature_names = None
     
     # Основной интерфейс
     tab1, tab2 = st.tabs(["📤 Загрузка CSV", "📝 Ручной ввод"])
@@ -57,8 +59,7 @@ if model and preprocessor:
         
         uploaded_file = st.file_uploader(
             "Выберите CSV файл", 
-            type=['csv'],
-            key="csv_uploader"
+            type=['csv']
         )
         
         if uploaded_file is not None:
@@ -73,30 +74,28 @@ if model and preprocessor:
                     st.dataframe(df.head())
                 
                 # Кнопка предсказания
-                if st.button("🎯 Сделать предсказания", key="predict_csv"):
+                if st.button("🎯 Сделать предсказания", type="primary"):
                     with st.spinner("Обрабатываю данные..."):
                         try:
                             # Преобразуем данные через препроцессор
-                            X_processed = preprocessor.transform(df)
+                            X_array = preprocessor.transform(df)
                             
-                            # Если результат не DataFrame, преобразуем его
-                            if not isinstance(X_processed, pd.DataFrame):
-                                # Пробуем получить имена признаков
-                                if hasattr(preprocessor, 'get_feature_names_out'):
-                                    feature_names = preprocessor.get_feature_names_out()
-                                    X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
-                                else:
-                                    X_processed_df = pd.DataFrame(X_processed)
+                            # ПРЕОБРАЗОВЫВАЕМ В DATAFRAME С ПРАВИЛЬНЫМИ КОЛОНКАМИ
+                            if feature_names is not None and len(feature_names) == X_array.shape[1]:
+                                X_processed = pd.DataFrame(X_array, columns=feature_names)
                             else:
-                                X_processed_df = X_processed
+                                # Если не получили имена, создаем с числовыми именами
+                                X_processed = pd.DataFrame(X_processed)
+                            
+                            st.write(f"📊 Обработано данных: {X_processed.shape}")
                             
                             # Делаем предсказания
-                            predictions = model.predict(X_processed_df)
+                            predictions = model.predict(X_processed)
                             
                             # Создаем результаты
                             if 'Id' in df.columns:
                                 results = pd.DataFrame({
-                                    'Id': df['Id'],
+                                    'Id': df['Id'].values,
                                     'SalePrice': predictions
                                 })
                             else:
@@ -130,12 +129,6 @@ if model and preprocessor:
                             
                         except Exception as e:
                             st.error(f"❌ Ошибка при обработке данных: {str(e)[:200]}")
-                            
-                            # Отладочная информация
-                            with st.expander("🔍 Детали ошибки"):
-                                st.write(f"Тип X_processed: {type(X_processed)}")
-                                if hasattr(X_processed, 'shape'):
-                                    st.write(f"Форма X_processed: {X_processed.shape}")
                             
             except Exception as e:
                 st.error(f"❌ Ошибка при чтении файла: {e}")
@@ -261,20 +254,16 @@ if model and preprocessor:
                         df_test = pd.DataFrame([test_data])
                         
                         # Применяем препроцессор
-                        X_processed = preprocessor.transform(df_test)
+                        X_array = preprocessor.transform(df_test)
                         
-                        # Если результат не DataFrame, преобразуем его
-                        if not isinstance(X_processed, pd.DataFrame):
-                            if hasattr(preprocessor, 'get_feature_names_out'):
-                                feature_names = preprocessor.get_feature_names_out()
-                                X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
-                            else:
-                                X_processed_df = pd.DataFrame(X_processed)
+                        # ПРЕОБРАЗОВЫВАЕМ В DATAFRAME
+                        if feature_names is not None and len(feature_names) == X_array.shape[1]:
+                            X_processed = pd.DataFrame(X_array, columns=feature_names)
                         else:
-                            X_processed_df = X_processed
+                            X_processed = pd.DataFrame(X_array)
                         
                         # Делаем предсказание
-                        prediction = model.predict(X_processed_df)[0]
+                        prediction = model.predict(X_processed)[0]
                         
                         # Показываем результат
                         st.success(f"## 🏡 Предсказанная цена: **${prediction:,.0f}**")
@@ -292,13 +281,6 @@ if model and preprocessor:
                             
                     except Exception as e:
                         st.error(f"❌ Ошибка: {str(e)[:200]}")
-                        
-                        # Отладочная информация
-                        with st.expander("🔍 Детали ошибки"):
-                            if 'X_processed' in locals():
-                                st.write(f"Тип X_processed: {type(X_processed)}")
-                                if hasattr(X_processed, 'shape'):
-                                    st.write(f"Форма X_processed: {X_processed.shape}")
 
 else:
     st.warning("⚠️ Проверьте наличие файлов GB_model.pkl и preprocessor.pkl в папке")
@@ -310,9 +292,4 @@ st.markdown("""
 - Должен содержать все 79 признаков из оригинального датасета
 - Категориальные признаки должны быть в строковом формате
 - Числовые признаки должны быть в числовом формате
-
-### 🔧 Техническая информация:
-- Модель: GradientBoostingRegressor
-- Препроцессор включает: CatBoostEncoder, StandardScaler
-- Удалены 28 признаков из оригинального набора
 """)
